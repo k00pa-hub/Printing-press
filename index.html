@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Talking Printer</title>
+<style>
+  :root {
+    --bg: #e8eef2; --text: #222; --muted: #7a8a96; --dot: #9db0bd;
+    --bubble: #fff; --bubble-line: #333;
+    --body: #cfd4d8; --lid: #b8bec3; --line: #555; --paper: #fff; --paper-line: #bbb;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1d2329; --dot: #4f5f6b; --text: #f0f0f0; --muted: #8b98a3;
+      --bubble: #2c343b; --bubble-line: #aab4bc;
+      --body: #5b646c; --lid: #4a535a; --line: #9aa4ab; --paper: #f2f2f2; --paper-line: #bbb;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1d2329; --dot: #4f5f6b; --text: #f0f0f0; --muted: #8b98a3;
+    --bubble: #2c343b; --bubble-line: #aab4bc;
+    --body: #5b646c; --lid: #4a535a; --line: #9aa4ab; --paper: #f2f2f2; --paper-line: #bbb;
+  }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    background-image: radial-gradient(circle at 50% 35%, color-mix(in srgb, var(--bg) 82%, #7c5cff), var(--bg) 70%);
+    font-family: Arial, Helvetica, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .stage { width: min(92vw, 520px); position: relative; z-index: 1; }
+  #dots { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+  svg { width: 100%; height: auto; display: block; }
+  #printer { cursor: pointer; transform-box: fill-box; transform-origin: 50% 100%; transition: transform .12s ease-out; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+  #printer.pressed { transform: translateY(34px) scale(0.68, 1.35); transition: transform .06s ease-out; }
+  #printer.boing { animation: boing .32s linear; }
+  @keyframes boing {
+    0%   { transform: translateY(34px) scale(0.68, 1.35); animation-timing-function: ease-out; }
+    18%  { transform: translateY(-40px) scale(1.3, 0.72) rotate(-4deg); animation-timing-function: ease-in-out; }
+    36%  { transform: translateY(6px) scale(0.86, 1.18) rotate(3deg); animation-timing-function: ease-in-out; }
+    54%  { transform: translateY(-14px) scale(1.1, 0.9) rotate(-2deg); animation-timing-function: ease-in-out; }
+    72%  { transform: translateY(2px) scale(0.97, 1.04) rotate(1deg); animation-timing-function: ease-in-out; }
+    100% { transform: none; }
+  }
+  #bubble { transition: opacity .15s; opacity: 0; pointer-events: none; }
+  #bubble { transform-box: fill-box; transform-origin: 50% 100%; }
+  #bubble.show { opacity: 1; animation: pop .5s linear; }
+  @keyframes pop {
+    0%   { transform: scale(0.2) translateY(30px); opacity: 0; animation-timing-function: cubic-bezier(.2, 1.5, .4, 1); }
+    60%  { transform: scale(1.12); opacity: 1; animation-timing-function: ease-in-out; }
+    80%  { transform: scale(0.97); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  .hint { color: var(--muted); font-size: 14px; margin-top: 8px; }
+  .counter { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-bottom: 6px; }
+  .counter div { background: var(--bubble); border: 2px solid var(--bubble-line); border-radius: 10px; padding: 6px 14px; text-align: center; min-width: 90px; }
+  .counter span { display: block; font-size: 12px; color: var(--muted); }
+  .counter b { font-size: 20px; font-variant-numeric: tabular-nums; }
+  .plus { position: absolute; left: 50%; top: 82%; transform: translate(-50%, 0); font-family: Arial, Helvetica, sans-serif; font-weight: 800; font-size: min(var(--fs, 28px), 9vw); white-space: nowrap; pointer-events: none; z-index: 2; text-shadow: 0 2px 0 rgba(0,0,0,.35), 0 0 8px rgba(0,0,0,.25); animation: plusUp 1.3s ease-out forwards; }
+  .plus.jackpot { color: #ff3df2; text-shadow: 0 0 12px #ffd400, 0 2px 0 rgba(0,0,0,.4); }
+  #printer { filter: drop-shadow(0 0 14px rgba(124,92,255,.6)); }
+  .counter div { border-color: #7c5cff; box-shadow: 0 0 14px rgba(124,92,255,.5); }
+  .title { text-align: center; font-weight: 900; letter-spacing: .2em; font-size: clamp(18px, 4vw, 26px); margin-bottom: 8px; background: linear-gradient(90deg, #00e5ff, #ff3df2, #ffd400, #00e5ff); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: slide 6s linear infinite; }
+  @keyframes slide { to { background-position: 300% 0; } }
+  #fx { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 4; pointer-events: none; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 3; }
+  .toolbar { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: 10px; z-index: 6; display: flex; gap: 8px; }
+  .toolbar button, .buy { font: 700 14px Arial, sans-serif; color: #fff; background: linear-gradient(135deg, #7c5cff, #ff3df2); border: 0; border-radius: 10px; padding: 8px 12px; cursor: pointer; box-shadow: 0 0 14px rgba(124,92,255,.6); }
+  .buy { width: 100%; }
+  .buy:disabled { background: #555; box-shadow: none; opacity: .6; cursor: not-allowed; }
+  .shop { position: fixed; top: calc(58px + env(safe-area-inset-top, 0px)); right: 10px; width: min(310px, 88vw); max-height: calc(100% - 80px); overflow-y: auto; z-index: 5; background: var(--bubble); color: var(--text); border: 2px solid #7c5cff; border-radius: 14px; padding: 12px; box-shadow: 0 0 26px rgba(124,92,255,.5); transition: transform .35s cubic-bezier(.2,.9,.3,1.2), opacity .25s; }
+  .shop.hide { transform: translateX(120%); opacity: 0; pointer-events: none; }
+  .shop h2 { margin: 0 0 6px; font-size: 18px; }
+  .odds { font-size: 13px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
+  .up { border-top: 1px solid var(--muted); padding: 10px 0 2px; }
+  .up b { display: block; }
+  .up small { display: block; color: var(--muted); margin: 2px 0 8px; }
+  .bar { height: 6px; border-radius: 6px; background: rgba(124,92,255,.25); margin-bottom: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #00e5ff, #ff3df2, #ffd400); }
+  .toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); z-index: 7; background: var(--bubble); color: var(--text); border: 2px solid #ffd400; border-radius: 12px; padding: 8px 14px; font: 700 15px Arial, sans-serif; box-shadow: 0 0 18px rgba(255,212,0,.6); white-space: nowrap; max-width: 92vw; pointer-events: none; }
+  @keyframes plusUp {
+    0%   { opacity: 0; transform: translate(-50%, 10px) scale(.6); }
+    15%  { opacity: 1; transform: translate(-50%, -10px) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -110px) scale(1); }
+  }
+</style>
+</head>
+<body>
+<canvas id="dots"></canvas>
+<canvas id="fx"></canvas>
+<div id="flash"></div>
+<div class="toolbar"><button id="sound" title="Sound">🔊</button><button id="shopBtn">⚡ Upgrades</button></div>
+<aside id="shop" class="shop"><h2>⚡ Upgrades</h2><div id="odds" class="odds"></div><div id="shopList"></div></aside>
+<div class="stage" id="stage">
+  <div class="title">PRINT-O-MATIC</div>
+  <div class="counter">
+    <div><span>Clicks</span><b id="clicks">0</b></div>
+    <div><span>Points</span><b id="points">0</b></div>
+    <div><span>Combo</span><b id="combo">0</b></div>
+    <div><span>🔥 Streak</span><b id="streak">1</b></div>
+  </div>
+  <div class="bar"><i id="comboBar"></i></div>
+  <svg viewBox="0 0 500 380" role="img" aria-label="A cartoon printer. Click it to hear it talk.">
+    <g id="bubble">
+      <rect x="40" y="15" width="420" height="110" rx="12" fill="var(--bubble)" stroke="var(--bubble-line)" stroke-width="2"/>
+      <polygon points="230,124 265,124 245,172" fill="var(--bubble)" stroke="var(--bubble-line)" stroke-width="2"/>
+      <line x1="232" y1="124" x2="263" y2="124" stroke="var(--bubble)" stroke-width="4"/>
+      <foreignObject x="55" y="22" width="390" height="96">
+        <div xmlns="http://www.w3.org/1999/xhtml" id="bubbleText"
+             style="height:96px;display:flex;align-items:center;justify-content:center;text-align:center;font:bold 18px Arial,Helvetica,sans-serif;color:var(--text)"></div>
+      </foreignObject>
+    </g>
+
+    <g id="printer">
+      <rect x="170" y="160" width="160" height="65" fill="var(--paper)" stroke="var(--paper-line)"/>
+      <rect x="110" y="220" width="280" height="110" fill="var(--body)" stroke="var(--line)" stroke-width="2"/>
+      <rect x="125" y="195" width="250" height="30" fill="var(--lid)" stroke="var(--line)" stroke-width="2"/>
+      <rect x="145" y="275" width="210" height="15" fill="#2b2b2b"/>
+      <rect x="165" y="285" width="170" height="65" fill="var(--paper)" stroke="var(--paper-line)"/>
+      <line x1="180" y1="302" x2="320" y2="302" stroke="var(--paper-line)"/>
+      <line x1="180" y1="316" x2="320" y2="316" stroke="var(--paper-line)"/>
+      <line x1="180" y1="330" x2="320" y2="330" stroke="var(--paper-line)"/>
+      <circle cx="347" cy="247" r="7" fill="#3ddc57" stroke="var(--line)"/>
+      <rect x="300" y="240" width="30" height="14" fill="#8a9096" stroke="var(--line)"/>
+      <circle id="eyeL" cx="202" cy="248" r="13" fill="#fff" stroke="var(--line)"/>
+      <circle id="pupilL" cx="202" cy="248" r="5" fill="#000"/>
+      <circle id="eyeR" cx="252" cy="248" r="13" fill="#fff" stroke="var(--line)"/>
+      <circle id="pupilR" cx="252" cy="248" r="5" fill="#000"/>
+      <rect x="125" y="330" width="35" height="12" fill="var(--line)"/>
+      <rect x="340" y="330" width="35" height="12" fill="var(--line)"/>
+    </g>
+  </svg>
+  <div class="hint" style="text-align:center">(click the printer)</div>
+</div>
+
+<script>
+  const PHRASES = [
+    "PC LOAD LETTER?! What does that even mean?!",
+    "I’m out of ink. Again. Shocking.",
+    "Paper jam. It’s not me, it’s you.",
+    "Ow. I’m not a button. Well, I’m kind of a button.",
+    "Printing… printing… still printing nothing.",
+    "I only work when your deadline is in five minutes.",
+    "Error: everything is fine. That’s the weirdest error.",
+    "Have you tried turning me off and on again?",
+    "I can print in color. I just choose not to.",
+    "Your document is ready. Just kidding, it’s stuck.",
+    "Stop poking me. I have feelings and toner.",
+    "Why do you only talk to me when you need something?",
+    "I was told there would be paper.",
+    "Low toner. Also, I’m judging you.",
+    "Scanner, copier, fax… and nobody ever says thank you.",
+    "Paper size mismatch. I don’t make the rules."
+  ];
+  const SHOW_MS = 3000;
+  let last = null, timer = null;
+
+  // ----- rewards: 1 is the most common, 999,999,999 is the rarest -----
+  // each row is [lowest, highest, chance in %]
+  const TIERS = [
+    [1, 1, 38],
+    [2, 9, 22],
+    [10, 99, 16],
+    [100, 999, 10],
+    [1000, 9999, 6],
+    [10000, 99999, 4],
+    [100000, 999999, 2.5],
+    [1000000, 99999999, 1.2],
+    [100000000, 999999998, 0.29],
+    [999999999, 999999999, 0.01]
+  ];
+  let clicks = 0, points = 0, earned = 0, stars = 0, streak = 1, lastDay = 0, lastSeen = 0, combo = 0, lastClick = 0;
+  const ach = new Set();
+  const stage = document.getElementById("stage");
+  const clicksEl = document.getElementById("clicks");
+  const pointsEl = document.getElementById("points");
+
+  // ----- upgrades -----
+  const levels = { charm: 0, net: 0, auto: 0, mult: 0, keeper: 0, magnet: 0 };
+  const UPGRADES = [
+    { key: "charm", name: "🍀 Lucky Charm", max: 12, desc: "Bigger numbers show up more often.", cost: l => 25 * Math.pow(4, l) },
+    { key: "net", name: "🛟 Safety Net", max: 6, desc: "Blocks the smallest rolls for good.", cost: l => 500 * Math.pow(10, l) },
+    { key: "auto", name: "🤖 Auto Printer", max: 20, desc: "Rolls for you every second, even while you are away.", cost: l => 150 * Math.pow(2.2, l) },
+    { key: "mult", name: "✖️ Mega Multiplier", max: 10, desc: "+50% on every roll.", cost: l => 2000 * Math.pow(5, l) },
+    { key: "keeper", name: "⏱️ Combo Keeper", max: 8, desc: "Your combo lasts longer between clicks.", cost: l => 800 * Math.pow(4, l) },
+    { key: "magnet", name: "🧲 Jackpot Magnet", max: 8, desc: "The jackpot is 3x more likely per level.", cost: l => 10000 * Math.pow(6, l) }
+  ];
+  const shop = document.getElementById("shop");
+  const shopList = document.getElementById("shopList");
+  const oddsEl = document.getElementById("odds");
+  const flash = document.getElementById("flash");
+  let soundOn = true, audio = null;
+
+  function weights() {
+    const m = 1 + 0.35 * levels.charm;
+    const w = TIERS.map((t, i) => (i < levels.net ? 0 : t[2] * Math.pow(m, i) * (i === 9 ? Math.pow(3, levels.magnet) : 1)));
+    const sum = w.reduce((a, b) => a + b, 0);
+    return w.map(x => x / sum * 100);
+  }
+
+  function renderShop() {
+    if (shop.matches(":active")) return; // don't rebuild while a button is being pressed
+    const w = weights();
+    oddsEl.innerHTML = "Chance of the smallest roll (+" + TIERS[levels.net][0].toLocaleString() + "): " + w[levels.net].toFixed(1) + "%<br>Jackpot (999,999,999): 1 in " + Math.round(100 / w[9]).toLocaleString() + "<br>Multiplier: ×" + totalMult().toFixed(2) + " · 🏆 " + ach.size + "/" + ACH.length;
+    shopList.innerHTML = "";
+    for (const u of UPGRADES) {
+      const lvl = levels[u.key], maxed = lvl >= u.max, cost = u.cost(lvl);
+      const d = document.createElement("div");
+      d.className = "up";
+      d.innerHTML = "<b>" + u.name + " · Lv " + lvl + "/" + u.max + "</b><small>" + u.desc + "</small>";
+      const b = document.createElement("button");
+      b.className = "buy";
+      b.textContent = maxed ? "MAXED" : "Buy · " + cost.toLocaleString() + " pts";
+      b.disabled = maxed || points < cost;
+      b.onclick = () => {
+        points -= cost; levels[u.key]++;
+        pointsEl.textContent = points.toLocaleString();
+        beep(8); renderShop();
+      };
+      d.appendChild(b);
+      shopList.appendChild(d);
+    }
+    const need = 2000000 * Math.pow(stars + 1, 2);
+    const rb = document.createElement("div");
+    rb.className = "up";
+    rb.innerHTML = "<b>⭐ Reboot · " + stars + " stars</b><small>Resets points and upgrades. Each star is a permanent +50% on everything. Needs " + need.toLocaleString() + " earned this run (you have " + earned.toLocaleString() + ").</small>";
+    const rbb = document.createElement("button");
+    rbb.className = "buy";
+    rbb.textContent = "Reboot";
+    rbb.disabled = earned < need;
+    rbb.onclick = () => {
+      stars++; points = 0; earned = 0;
+      for (const k in levels) levels[k] = 0;
+      toast("⭐ Rebooted! Star " + stars); save(); refresh();
+    };
+    rb.appendChild(rbb);
+    shopList.appendChild(rb);
+  }
+
+  function beep(tier) {
+    if (!soundOn) return;
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+      const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+      o.type = tier > 6 ? "sawtooth" : "square";
+      o.frequency.value = 220 * Math.pow(1.12, tier * 2);
+      g.gain.setValueAtTime(0.07, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.25);
+      o.connect(g); g.connect(audio.destination);
+      o.start(t); o.stop(t + 0.25);
+    } catch (e) {}
+  }
+
+  function burst(x, y, n, hue) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * 6.283, v = 2 + Math.random() * 7;
+      sparks.push({ x: x, y: y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 2, life: 1, size: 2 + Math.random() * 4, hue: hue + Math.random() * 40 - 20 });
+    }
+  }
+
+  function effects(tier) {
+    const r = printer.getBoundingClientRect();
+    const hue = tier === 9 ? 300 : 140 - tier * 12;
+    burst(r.left + r.width / 2, r.top + r.height / 2, 14 + tier * 12, hue);
+    if (tier >= 6) {
+      flash.style.background = "hsl(" + hue + " 90% 60%)";
+      flash.animate([{ opacity: 0.45 }, { opacity: 0 }], { duration: 600 });
+      const s = 4 + tier * 2;
+      stage.animate([
+        { transform: "translate(0,0)" }, { transform: "translate(" + s + "px," + -s + "px)" },
+        { transform: "translate(" + -s + "px," + s + "px)" }, { transform: "translate(" + s + "px," + s + "px)" },
+        { transform: "translate(0,0)" }
+      ], { duration: 350 });
+    }
+    const ring = document.createElement("div");
+    ring.style.cssText = "position:fixed;left:" + (r.left + r.width / 2) + "px;top:" + (r.top + r.height / 2) + "px;width:20px;height:20px;margin:-10px;border-radius:50%;pointer-events:none;z-index:4;border:3px solid hsl(" + hue + " 95% 60%)";
+    document.body.appendChild(ring);
+    ring.animate([{ transform: "scale(1)", opacity: 1 }, { transform: "scale(" + (8 + tier * 4) + ")", opacity: 0 }], { duration: 600 }).onfinish = () => ring.remove();
+    beep(tier);
+  }
+
+  document.getElementById("shopBtn").onclick = () => shop.classList.toggle("hide");
+  const soundBtn = document.getElementById("sound");
+  soundBtn.onclick = () => { soundOn = !soundOn; soundBtn.textContent = soundOn ? "🔊" : "🔇"; };
+  if (window.innerWidth < 700) shop.classList.add("hide");
+
+  // ----- hooks: combo, achievements, save, toasts -----
+  const KEY = "printomatic-v1";
+  const comboEl = document.getElementById("combo"), comboBar = document.getElementById("comboBar"), streakEl = document.getElementById("streak");
+  const ACH = [
+    ["Warm-up (10 clicks)", r => clicks >= 10],
+    ["Click machine (100 clicks)", r => clicks >= 100],
+    ["Printer addict (1,000 clicks)", r => clicks >= 1000],
+    ["Big roll (+10,000)", r => r.amount >= 10000],
+    ["Millionaire (earn 1,000,000)", r => earned >= 1e6],
+    ["Combo king (combo 50)", r => combo >= 50],
+    ["JACKPOT!", r => r.tier === 9],
+    ["Shopper (10 upgrade levels)", r => Object.values(levels).reduce((a, b) => a + b, 0) >= 10],
+    ["Reboot", r => stars >= 1]
+  ];
+  function comboWindow() { return 1200 + levels.keeper * 300; }
+  function tickCombo() {
+    const now = performance.now();
+    combo = now - lastClick < comboWindow() ? combo + 1 : 1;
+    lastClick = now;
+  }
+  function totalMult() {
+    return (1 + Math.min(combo, 200) * 0.03) * (1 + levels.mult * 0.5) * (1 + stars * 0.5) * (1 + ach.size * 0.05);
+  }
+  function checkAch(r) {
+    ACH.forEach((a, i) => {
+      if (!ach.has(i) && a[1](r)) { ach.add(i); toast("🏆 " + a[0] + " · +5% forever"); }
+    });
+  }
+  function toast(msg) {
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = msg;
+    t.style.top = (14 + document.querySelectorAll(".toast").length * 50) + "px";
+    document.body.appendChild(t);
+    t.animate([{ opacity: 0, transform: "translate(-50%,-20px)" }, { opacity: 1, transform: "translate(-50%,0)", offset: 0.1 }, { opacity: 1, transform: "translate(-50%,0)", offset: 0.85 }, { opacity: 0, transform: "translate(-50%,-10px)" }], { duration: 2800 }).onfinish = () => t.remove();
+    burst(window.innerWidth / 2, 60, 30, 50);
+  }
+  function refresh() {
+    clicksEl.textContent = clicks.toLocaleString();
+    pointsEl.textContent = points.toLocaleString();
+    renderShop();
+  }
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ points: points, clicks: clicks, earned: earned, stars: stars, streak: streak, lastDay: lastDay, levels: levels, ach: Array.from(ach), t: Date.now() }));
+    } catch (e) {}
+  }
+  function load() {
+    try {
+      const s = JSON.parse(localStorage.getItem(KEY));
+      if (!s) return;
+      points = s.points || 0; clicks = s.clicks || 0; earned = s.earned || 0; stars = s.stars || 0;
+      streak = s.streak || 1; lastDay = s.lastDay || 0; lastSeen = s.t || 0;
+      Object.assign(levels, s.levels || {});
+      (s.ach || []).forEach(i => ach.add(i));
+    } catch (e) {}
+  }
+
+  function rollAmount() {
+    const w = weights();
+    let r = Math.random() * 100;
+    for (let i = 0; i < TIERS.length; i++) {
+      r -= w[i];
+      if (r < 0 || i === TIERS.length - 1) {
+        const lo = TIERS[i][0], hi = TIERS[i][1];
+        return { amount: lo + Math.floor(Math.random() * (hi - lo + 1)), tier: i };
+      }
+    }
+  }
+
+  function gain() {
+    const roll = rollAmount();
+    tickCombo();
+    roll.amount = Math.round(roll.amount * totalMult());
+    printer.style.filter = "drop-shadow(0 0 " + (14 + Math.min(combo, 60)) + "px hsl(" + (280 - Math.min(combo, 100) * 2.5) + " 95% 60%))";
+    clicks += 1;
+    points += roll.amount;
+    earned += roll.amount;
+    checkAch(roll);
+    save();
+    clicksEl.textContent = clicks.toLocaleString();
+    pointsEl.textContent = points.toLocaleString();
+    effects(roll.tier);
+    renderShop();
+
+    const pop = document.createElement("div");
+    pop.className = "plus" + (roll.tier === TIERS.length - 1 ? " jackpot" : "");
+    pop.textContent = "+" + roll.amount.toLocaleString();
+    pop.style.setProperty("--fs", (26 + roll.tier * 5) + "px");
+    if (roll.tier < TIERS.length - 1) {
+      pop.style.color = "hsl(" + (140 - roll.tier * 12) + " 85% 52%)";
+    }
+    pop.style.left = (35 + Math.random() * 30) + "%";
+    pop.addEventListener("animationend", () => pop.remove());
+    stage.appendChild(pop);
+  }
+
+  const bubble = document.getElementById("bubble");
+  const bubbleText = document.getElementById("bubbleText");
+
+  const printer = document.getElementById("printer");
+  let pressing = false, busy = false, pending = false, pressStart = 0;
+  const MIN_HOLD = 160; // even a super quick click gets a visible squish
+
+  function speak() {
+    gain();
+    const choices = PHRASES.filter(p => p !== last);
+    const phrase = choices[Math.floor(Math.random() * choices.length)];
+    last = phrase;
+    bubbleText.textContent = phrase;
+    bubble.classList.remove("show");
+    void bubble.getBoundingClientRect(); // restart the pop animation every time
+    bubble.classList.add("show");
+    clearTimeout(timer);
+    timer = setTimeout(() => bubble.classList.remove("show"), SHOW_MS);
+  }
+
+  // press down: printer gets pushed, taller and thinner
+  printer.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (busy) { pending = true; return; } // animation is playing, line this click up next
+    pressing = true;
+    pressStart = performance.now();
+    printer.classList.add("pressed");
+  });
+
+  // let go (anywhere): printer pops back and the message plays
+  function startBoing() {
+    printer.classList.remove("pressed");
+    printer.classList.remove("boing");
+    void printer.getBoundingClientRect();
+    printer.classList.add("boing");
+    speak();
+  }
+
+  function release() {
+    if (!pressing) return;
+    pressing = false;
+    startBoing();
+  }
+
+  // when a bounce finishes, play the next queued click (if any) in full
+  printer.addEventListener("animationend", () => {
+    printer.classList.remove("boing");
+    busy = false;
+    if (pending) {
+      pending = false;
+      busy = true;
+      printer.classList.add("pressed");
+      setTimeout(startBoing, MIN_HOLD);
+    }
+  });
+  window.addEventListener("pointerup", release);
+  window.addEventListener("pointercancel", () => {
+    pressing = false;
+    printer.classList.remove("pressed");
+  });
+  // ----- eyes follow the cursor + dots run away from it -----
+  const eyes = [
+    { white: document.getElementById("eyeL"), pupil: document.getElementById("pupilL") },
+    { white: document.getElementById("eyeR"), pupil: document.getElementById("pupilR") }
+  ];
+  const canvas = document.getElementById("dots");
+  const ctx = canvas.getContext("2d");
+  const mouse = { x: 0, y: 0, seen: false, active: false };
+  const RADIUS = 120, DOT_R = 2;
+  let dots = [], dotColor = "#9db0bd", W = 0, H = 0;
+  const hot = [], sparks = [];
+  const fx = document.getElementById("fx");
+  const fctx = fx.getContext("2d");
+
+  window.addEventListener("pointermove", (e) => {
+    mouse.x = e.clientX; mouse.y = e.clientY;
+    mouse.seen = true; mouse.active = true;
+    if (Math.random() < 0.6) burst(e.clientX, e.clientY, 1, performance.now() / 8 % 360); // rainbow cursor trail
+  });
+  window.addEventListener("pointerup", (e) => {
+    if (e.pointerType === "touch") mouse.active = false; // finger lifted
+  });
+  document.documentElement.addEventListener("mouseleave", () => { mouse.active = false; });
+
+  function setup() {
+    const dpr = window.devicePixelRatio || 1;
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    fx.width = W * dpr; fx.height = H * dpr;
+    fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const gap = Math.max(20, Math.sqrt((W * H) / 7000));
+    dots = [];
+    for (let y = gap / 2; y < H; y += gap) {
+      for (let x = gap / 2; x < W; x += gap) {
+        dots.push({ hx: x, hy: y, x: x, y: y, vx: 0, vy: 0 });
+      }
+    }
+    dotColor = getComputedStyle(document.documentElement).getPropertyValue("--dot").trim() || dotColor;
+  }
+  window.addEventListener("resize", setup);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", setup);
+  setup();
+
+  function frame() {
+    // combo meter drains over time
+    const left = combo ? 1 - (performance.now() - lastClick) / comboWindow() : 0;
+    if (left <= 0) combo = 0;
+    comboBar.style.width = Math.max(0, left * 100) + "%";
+    comboEl.textContent = combo ? combo + " · ×" + totalMult().toFixed(1) : "0";
+    // eyes: pupils slide toward the cursor, staying inside the eye
+    for (const eye of eyes) {
+      const r = eye.white.getBoundingClientRect();
+      const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      const dx = mouse.x - cx, dy = mouse.y - cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const reach = mouse.seen ? Math.min(6.5, d / 15) : 0;
+      const ox = (dx / d * reach).toFixed(2), oy = (dy / d * reach).toFixed(2);
+      eye.pupil.setAttribute("transform", "translate(" + ox + " " + oy + ")");
+    }
+
+    // dots: pushed away from the cursor, springing back home
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = dotColor;
+    ctx.beginPath();
+    for (const p of dots) {
+      if (mouse.active) {
+        const dx = p.x - mouse.x, dy = p.y - mouse.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < RADIUS * RADIUS && d2 > 0.01) {
+          const d = Math.sqrt(d2);
+          const f = Math.pow(1 - d / RADIUS, 2) * 8;
+          p.vx += dx / d * f;
+          p.vy += dy / d * f;
+        }
+      }
+      p.vx += (p.hx - p.x) * 0.06;
+      p.vy += (p.hy - p.y) * 0.06;
+      p.vx *= 0.82;
+      p.vy *= 0.82;
+      p.x += p.vx;
+      p.y += p.vy;
+      if (Math.abs(p.x - p.hx) + Math.abs(p.y - p.hy) > 5) {
+        hot.push(p);
+      } else {
+        ctx.moveTo(p.x + DOT_R, p.y);
+        ctx.arc(p.x, p.y, DOT_R, 0, Math.PI * 2);
+      }
+    }
+    ctx.fill();
+
+    // dots that are moving glow and cycle colors
+    ctx.fillStyle = "hsl(" + (performance.now() / 10 % 360) + " 95% 62%)";
+    ctx.beginPath();
+    for (const p of hot) { ctx.moveTo(p.x + 3.2, p.y); ctx.arc(p.x, p.y, 3.2, 0, Math.PI * 2); }
+    ctx.fill();
+    hot.length = 0;
+
+    // sparks from the printer
+    fctx.clearRect(0, 0, W, H);
+    for (let i = sparks.length - 1; i >= 0; i--) {
+      const s = sparks[i];
+      s.x += s.vx; s.y += s.vy; s.vy += 0.15; s.vx *= 0.985; s.life -= 0.02;
+      if (s.life <= 0) { sparks.splice(i, 1); continue; }
+      fctx.fillStyle = "hsla(" + s.hue + ",95%,60%," + s.life + ")";
+      fctx.beginPath();
+      fctx.arc(s.x, s.y, s.size * s.life + 0.5, 0, Math.PI * 2);
+      fctx.fill();
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  // ----- start up: load save, daily streak, offline earnings, auto printers -----
+  load();
+  const today = Math.floor((Date.now() - new Date().getTimezoneOffset() * 60000) / 864e5);
+  if (lastDay !== today) {
+    streak = lastDay === today - 1 ? streak + 1 : 1;
+    const bonus = 1000 * streak * (1 + stars);
+    points += bonus; earned += bonus; lastDay = today;
+    setTimeout(() => toast("🔥 Day " + streak + " streak! +" + bonus.toLocaleString() + " pts. Come back tomorrow for more!"), 600);
+  }
+  if (lastSeen && levels.auto) {
+    const away = Math.floor(Math.min(8 * 3600, (Date.now() - lastSeen) / 1000) * levels.auto * 3 * (1 + stars));
+    if (away > 0) { points += away; earned += away; setTimeout(() => toast("🤖 Your printers made +" + away.toLocaleString() + " while you were away"), 1800); }
+  }
+  streakEl.textContent = streak;
+  refresh();
+  save();
+
+  setInterval(() => {
+    if (!levels.auto) return;
+    let sum = 0;
+    for (let i = 0; i < levels.auto; i++) sum += rollAmount().amount;
+    sum = Math.round(sum * totalMult());
+    points += sum; earned += sum;
+    const p = document.createElement("div");
+    p.className = "plus";
+    p.textContent = "🤖 +" + sum.toLocaleString();
+    p.style.setProperty("--fs", "18px");
+    p.style.color = "#00e5ff";
+    p.style.left = (20 + Math.random() * 60) + "%";
+    p.addEventListener("animationend", () => p.remove());
+    stage.appendChild(p);
+    checkAch({ amount: 0, tier: 0 });
+    refresh(); save();
+  }, 1000);
+</script>
+</body>
+</html>
